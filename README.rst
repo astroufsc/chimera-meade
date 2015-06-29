@@ -46,7 +46,7 @@ Here goes examples of the configuration to be added on ``chimera.config`` file.
 
 ::
 
-    #focuser:
+    focuser:
       type: OptecTCFS
       name: optec
       device: COM6          # /dev/ttyS?? on linux
@@ -82,7 +82,7 @@ For more information, contact us on chimera's discussion list:
 https://groups.google.com/forum/#!forum/chimera-discuss
 
 Bug reports and patches are welcome and can be sent over our GitHub page:
-https://github.com/astroufsc/chimera_template/
+https://github.com/astroufsc/chimera-serial/
 
 .. _chimera: https://www.github.com/astroufsc/chimera/
 .. _pyserial: http://pyserial.sourceforge.net/
