@@ -1,56 +1,78 @@
-chimera_template plugin
-=======================
+chimera-serial plugin
+=====================
 
-This is a template plugin for the chimera observatory control system
-https://github.com/astroufsc/chimera.
+A chimera_ plugin for a bunch of serial bus devices.
 
 Usage
 -----
 
-Rename chimera_template for your plugin name. It is important that the plugin
-name must start with chimera\_ to be found by chimera. Instruments and
-controllers must follow the standard ``chimera_(plugin_name)/(instruments|controllers)/(plugin).py``
-
-The class inside ``(plugin).py`` should be named Plugin (with CamelCase letters).
-
-For more info: https://github.com/astroufsc/chimera/blob/master/docs/site/chimerafordevs.rst#chimera-objects
-
+Install chimera_ on your computer, and then, this package. Edit the configuration file adding one of the serial
+supported devices as on the example below.
 
 Installation
 ------------
 
-Installation instructions. Dependencies, etc...
+Besides chimera_, ``chimera-serial`` depends only of pyserial_.
 
 ::
 
-   pip install -U chimera_template
-
-or
-
-::
-
-    pip install -U git+https://github.com/astroufsc/chimera_template.git
+    pip install -U git+https://github.com/astroufsc/chimera-serial.git
 
 
-Configuration Example
----------------------
+Configuration Examples
+----------------------
 
-Here goes an example of the configuration to be added on ``chimera.config`` file.
+Here goes examples of the configuration to be added on ``chimera.config`` file.
+
+* `MEADE LX200`_ telescope
 
 ::
 
-    instrument:
-        name: model
-        type: Example
+    telescope:
+        name: lx200
+        type: Meade
+        device: /dev/ttyS0    # can be COM1 on Windows
+
+* `JMI Smart 232`_ focuser
+
+::
+
+    focuser:
+      name: jmismart
+      type: JMIsmart232
+      device: COM3          # /dev/ttyS?? on linux
+
+* `Optec TCF-S`_ focuser
+
+::
+
+    #focuser:
+      type: OptecTCFS
+      name: optec
+      device: COM6          # /dev/ttyS?? on linux
+
+* LNA_ 40cm dome
+
+::
+
+    dome:
+     type: DomeLNA40cm
+     name: dome
+     device: COM7
+     telescope: 200.131.64.200:7666/TheSkyTelescope/paramount
+     telescope: /FakeTelescope/fake
+     model: COTE/LNA
 
 
-Tested Hardware (for instruments)
----------------------------------
+Tested Hardware
+---------------
 
 This plugin was tested on these hardware:
 
-* Hardware example 1, model 2
-* Hardware example 2, model 3
+* `JMI Smart 232`_ focuser
+* MEADE LX200 16'' telescope
+* `Optec TCF-S`_ focuser
+* LNA 40cm dome. This dome is a custom build.
 
 
 Contact
@@ -61,3 +83,10 @@ https://groups.google.com/forum/#!forum/chimera-discuss
 
 Bug reports and patches are welcome and can be sent over our GitHub page:
 https://github.com/astroufsc/chimera_template/
+
+.. _chimera: https://www.github.com/astroufsc/chimera/
+.. _pyserial: http://pyserial.sourceforge.net/
+.. _JMI Smart 232: http://www.jimsmobile.com/
+.. _LNA: http://www.lna.br/
+.. _MEADE LX200: http://www.meade.com/products/telescopes/lx200.html
+.. _Optec TCF-S: http://www.optecinc.com/astronomy/catalog/tcf/tcf-s.htm
