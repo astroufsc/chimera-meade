@@ -1,60 +1,35 @@
-#! /usr/bin/python
-# -*- coding: iso-8859-1 -*-
+# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-FileCopyrightText: 2006-present Paulo Henrique Silva <ph.silva@gmail.com>
 
-# chimera - observatory automation system
-# Copyright (C) 2006-2007  P. Henrique Silva <henrique@astro.ufsc.br>
-
-# This program is free software; you can redistribute it and/or
-# modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
-# of the License, or (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
-# 02110-1301, USA.
-
-import time
-import threading
 import datetime as dt
-from types import FloatType
 import os
-
-try:
-    import cPickle as pickle
-except ImportError:
-    import pickle
+import pickle
+import threading
+import time
 
 import serial
-
-from chimera.instruments.telescope import TelescopeBase
-from chimera.interfaces.telescope import SlewRate, AlignMode, TelescopeStatus
-
-from chimera.util.coord import Coord
-from chimera.util.position import Position, Epoch
-from chimera.util.enum import Enum
-
-from chimera.core.lock import lock
-from chimera.core.exceptions import ObjectNotFoundException, ChimeraException
 from chimera.core.constants import SYSTEM_CONFIG_DIRECTORY
+from chimera.core.exceptions import ChimeraException, ObjectNotFoundException
+from chimera.core.lock import lock
+from chimera.instruments.telescope import TelescopeBase
+from chimera.interfaces.telescope import AlignMode, TelescopeStatus
+from chimera.util.coord import Coord
+from chimera.util.enum import Enum
+from chimera.util.position import Epoch, Position
 
 Direction = Enum("E", "W", "N", "S")
+SlewRate = Enum("GUIDE", "CENTER", "FIND", "MAX")
+
 
 class MeadeException(ChimeraException):
     pass
 
-class Meade(TelescopeBase):
 
-    __config__ = {'azimuth180Correct': True}
+class Meade(TelescopeBase):
+    __config__ = {"azimuth180Correct": True}
 
     def __init__(self):
-
-        TelescopeBase.__init__(self)
+        super().__init__()
 
         self._tty = None
         self._slewRate = None
@@ -74,16 +49,18 @@ class Meade(TelescopeBase):
         self._debugLog = None
         try:
             self._debugLog = open(
-                os.path.join(SYSTEM_CONFIG_DIRECTORY, "meade-debug.log"), "w")
-        except IOError, e:
+                os.path.join(SYSTEM_CONFIG_DIRECTORY, "meade-debug.log"), "w"
+            )
+        except OSError as e:
             self.log.warning("Could not create meade debug file (%s)" % str(e))
 
         # how much arcseconds / second for every slew rate
         # and direction
-        self._calibration = {}
+        self._calibration: dict[SlewRate, dict[Direction, int]] = {}
         self._calibration_time = 5.0
         self._calibrationFile = os.path.join(
-            SYSTEM_CONFIG_DIRECTORY, "move_calibration.bin")
+            SYSTEM_CONFIG_DIRECTORY, "move_calibration.bin"
+        )
 
         for rate in SlewRate:
             self._calibration[rate] = {}
@@ -98,19 +75,16 @@ class Meade(TelescopeBase):
         # try to read saved calibration data
         if os.path.exists(self._calibrationFile):
             try:
-                self._calibration = pickle.loads(
-                    open(self._calibrationFile, "r").read())
+                self._calibration = pickle.loads(open(self._calibrationFile).read())
                 self.calibrated = True
-            except Exception, e:
-                self.log.warning(
-                    "Problems reading calibration persisted data (%s)" % e)
+            except Exception as e:
+                self.log.warning("Problems reading calibration persisted data (%s)" % e)
 
         return True
 
     def __stop__(self):
-
-        if self.isSlewing():
-            self.abortSlew()
+        if self.is_slewing():
+            self.abort_slew()
 
         self.close()
 
@@ -119,59 +93,62 @@ class Meade(TelescopeBase):
 
     # -- ITelescope implementation
 
-    def _checkMeade(self):
-
+    def _check_meade(self):
         tmp = self._tty.timeout
         self._tty.timeout = 5
 
-        align = self.getAlignMode()
+        align = self.get_align_mode()
 
         self._tty.timeout = tmp
 
         if align < 0:
             raise MeadeException(
-                "Couldn't find a Meade telescope on '%s'." % self["device"])
+                "Couldn't find a Meade telescope on '%s'." % self["device"]
+            )
 
         return True
 
-    def _initTelescope(self):
-
-        self.setAlignMode(self["align_mode"])
+    def _init_telescope(self):
+        self.set_align_mode(self["align_mode"])
 
         # activate HPP (high precision poiting). We really need this!!
-        self._setHighPrecision()
+        self._set_high_precision()
 
         # set default slew rate
-        self.setSlewRate(self["slew_rate"])
+        self.set_slew_rate(self["slew_rate"])
 
         try:
             site = self.getManager().getProxy("/Site/0")
 
-            self.setLat(site["latitude"])
-            self.setLong(site["longitude"])
-            self.setLocalTime(dt.datetime.now().time())
-            self.setUTCOffset(site.utcoffset())
-            self.setDate(dt.date.today())
+            self.set_lat(site["latitude"])
+            self.set_long(site["longitude"])
+            self.set_local_time(dt.datetime.now().time())
+            self.set_utc_offset(site.utcoffset())
+            self.set_date(dt.date.today())
         except ObjectNotFoundException:
-            self.log.warning("Cannot initialize telescope. "
-                             "Site object not available. Telescope"
-                             " attitude cannot be determined.")
+            self.log.warning(
+                "Cannot initialize telescope. "
+                "Site object not available. Telescope"
+                " attitude cannot be determined."
+            )
 
     @lock
     def open(self):
-
-        self._tty = serial.Serial(self["device"],
-                                  baudrate=9600,
-                                  bytesize=serial.EIGHTBITS,
-                                  parity=serial.PARITY_NONE,
-                                  stopbits=serial.STOPBITS_ONE,
-                                  timeout=self["timeout"],
-                                  xonxoff=False, rtscts=False)
+        self._tty = serial.Serial(
+            self["device"],
+            baudrate=9600,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE,
+            stopbits=serial.STOPBITS_ONE,
+            timeout=self["timeout"],
+            xonxoff=False,
+            rtscts=False,
+        )
 
         try:
             self._tty.open()
 
-            self._checkMeade()
+            self._check_meade()
 
             # if self["auto_align"]:
             #    self.autoAlign ()
@@ -180,11 +157,11 @@ class Meade(TelescopeBase):
             if self["skip_init"]:
                 self.log.info("Skipping init as requested.")
             else:
-                self._initTelescope()
+                self._init_telescope()
 
             return True
 
-        except (serial.SerialException, IOError):
+        except (OSError, serial.SerialException):
             raise MeadeException("Error while opening %s." % self["device"])
 
     @lock
@@ -198,32 +175,29 @@ class Meade(TelescopeBase):
     # --
 
     @lock
-    def autoAlign(self):
-
+    def auto_align(self):
         self._write(":Aa#")
 
         while not self._tty.inWaiting():
             time.sleep(1)
 
         # FIXME: bad LX200 behaviour
-        #tmp = self._read(1)
+        # tmp = self._read(1)
 
         return True
 
     @lock
-    def getAlignMode(self):
-
-        self._write('\x06')  # ACK
+    def get_align_mode(self):
+        self._write("\x06")  # ACK
 
         ret = self._read(1)
 
         # damn stupid '0' at the start of the mode
-        if ret == '0':
+        if ret == "0":
             ret = self._read(1, flush=False)
 
         if not ret or ret not in "APL":
-            raise MeadeException(
-                "Couldn't get the alignment mode. Is this a Meade??")
+            raise MeadeException("Couldn't get the alignment mode. Is this a Meade??")
 
         if ret == "A":
             return AlignMode.ALT_AZ
@@ -233,9 +207,8 @@ class Meade(TelescopeBase):
             return AlignMode.LAND
 
     @lock
-    def setAlignMode(self, mode):
-
-        if mode == self.getAlignMode():
+    def set_align_mode(self, mode):
+        if mode == self.get_align_mode():
             return True
 
         if mode == AlignMode.ALT_AZ:
@@ -250,35 +223,33 @@ class Meade(TelescopeBase):
         return True
 
     @lock
-    def slewToRaDec(self, position):
-
+    def slew_to_ra_dec(self, position):
         position = position.toEpoch(Epoch.NOW)
 
         self._validateRaDec(position)
 
-        if self.isSlewing():
+        if self.is_slewing():
             # never should happens 'cause @lock
             raise MeadeException("Telescope already slewing.")
 
-        self.setTargetRaDec(position.ra, position.dec)
+        self.set_target_ra_dec(position.ra, position.dec)
 
         status = TelescopeStatus.OK
 
         try:
-            status = self._slewToRaDec()
+            status = self._slew_to_ra_dec()
             return True
         finally:
-            self.slewComplete(self.getPositionRaDec(), status)
+            self.slewComplete(self.get_position_ra_dec(), status)
 
         return False
 
-    def _slewToRaDec(self):
-
+    def _slew_to_ra_dec(self):
         self._slewing = True
         self._abort.clear()
 
         # slew
-        self._write(':MS#')
+        self._write(":MS#")
 
         # to handle timeout
         start_time = time.time()
@@ -292,44 +263,42 @@ class Meade(TelescopeBase):
             raise MeadeException(msg[:-1])
 
         # slew possible
-        target = self.getTargetRaDec()
+        target = self.get_target_ra_dec()
 
-        return self._waitSlew(start_time, target)
+        return self._wait_slew(start_time, target)
 
     @lock
-    def slewToAltAz(self, position):
-
+    def slew_to_alt_az(self, position):
         self._validateAltAz(position)
 
-        self.setSlewRate(self["slew_rate"])
+        self.set_slew_rate(self["slew_rate"])
 
-        if self.isSlewing():
+        if self.is_slewing():
             # never should happens 'cause @lock
             raise MeadeException("Telescope already slewing.")
 
-        lastAlignMode = self.getAlignMode()
+        last_align_mode = self.get_align_mode()
 
-        self.setTargetAltAz(position.alt, position.az)
+        self.set_target_alt_az(position.alt, position.az)
 
         status = TelescopeStatus.OK
 
         try:
-            self.setAlignMode(AlignMode.ALT_AZ)
-            status = self._slewToAltAz()
+            self.set_align_mode(AlignMode.ALT_AZ)
+            status = self._slew_to_alt_az()
             return True
         finally:
-            self.slewComplete(self.getPositionRaDec(), status)
-            self.setAlignMode(lastAlignMode)
+            self.slewComplete(self.get_position_ra_dec(), status)
+            self.set_align_mode(last_align_mode)
 
         return False
 
-    def _slewToAltAz(self):
-
+    def _slew_to_alt_az(self):
         self._slewing = True
         self._abort.clear()
 
         # slew
-        self._write(':MA#')
+        self._write(":MA#")
 
         # to handle timeout
         start_time = time.time()
@@ -340,19 +309,18 @@ class Meade(TelescopeBase):
             # check error message
             self._slewing = False
             raise MeadeException(
-                "Couldn't slew to ALT/AZ: '%s'." % self.getTargetAltAz())
+                "Couldn't slew to ALT/AZ: '%s'." % self.get_target_alt_az()
+            )
 
         # slew possible
-        target = self.getTargetAltAz()
+        target = self.get_target_alt_az()
 
-        return self._waitSlew(start_time, target, local=True)
+        return self._wait_slew(start_time, target, local=True)
 
-    def _waitSlew(self, start_time, target, local=False):
-
+    def _wait_slew(self, start_time, target, local=False):
         self.slewBegin(target)
 
         while True:
-
             # check slew abort event
             if self._abort.isSet():
                 self._slewing = False
@@ -360,14 +328,14 @@ class Meade(TelescopeBase):
 
             # check timeout
             if time.time() >= (start_time + self["max_slew_time"]):
-                self.abortSlew()
+                self.abort_slew()
                 self._slewing = False
                 raise MeadeException("Slew aborted. Max slew time reached.")
 
             if local:
-                position = self.getPositionAltAz()
+                position = self.get_position_alt_az()
             else:
-                position = self.getPositionRaDec()
+                position = self.get_position_ra_dec()
 
             if target.within(position, eps=Coord.fromAS(60)):
                 time.sleep(self["stabilization_time"])
@@ -378,34 +346,35 @@ class Meade(TelescopeBase):
 
         return TelescopeStatus.ERROR
 
-    def abortSlew(self):
-
-        if not self.isSlewing():
+    def abort_slew(self):
+        if not self.is_slewing():
             return True
 
         self._abort.set()
 
-        self.stopMoveAll()
+        self.stop_move_all()
 
         time.sleep(self["stabilization_time"])
 
-    def isSlewing(self):
+    def is_slewing(self):
         return self._slewing
 
-    def _move(self, direction, duration=1.0, slewRate=SlewRate.GUIDE):
+    def _move(self, direction, duration=1.0, slew_rate=None):
+        if slew_rate is None:
+            slew_rate = SlewRate.GUIDE
 
         if duration <= 0:
             raise ValueError("Slew duration cannot be less than 0.")
 
         # FIXME: concurrent slew commands? YES.. it should works!
-        if self.isSlewing():
+        if self.is_slewing():
             # REALLY? no.
             raise MeadeException("Telescope is slewing. Cannot move.")
 
-        if slewRate:
-            self.setSlewRate(slewRate)
+        if slew_rate:
+            self.set_slew_rate(slew_rate)
 
-        startPos = self.getPositionRaDec()
+        start_pos = self.get_position_ra_dec()
 
         self._slewing = True
         self._write(":M%s#" % str(direction).lower())
@@ -419,21 +388,21 @@ class Meade(TelescopeBase):
             pass  # busy wait!
 
         # FIXME: slew limits
-        self._stopMove(direction)
+        self._stop_move(direction)
         self._slewing = False
 
-        def calcDelta(start, end):
+        def calc_delta(start, end):
             return Coord.fromD(end.angsep(start))
 
-        delta = calcDelta(startPos, self.getPositionRaDec())
+        delta = calc_delta(start_pos, self.get_position_ra_dec())
         self.log.debug("[move] moved %f arcsec" % delta.AS)
 
         return True
 
-    def _stopMove(self, direction):
+    def _stop_move(self, direction):
         self._write(":Q%s#" % str(direction).lower())
 
-        rate = self.getSlewRate()
+        rate = self.get_slew_rate()
         # FIXME: stabilization time depends on the slewRate!!!
         if rate == SlewRate.GUIDE:
             time.sleep(0.1)
@@ -451,22 +420,21 @@ class Meade(TelescopeBase):
             time.sleep(0.4)
             return True
 
-    def isMoveCalibrated(self):
+    def is_move_calibrated(self):
         return os.path.exists(self._calibrationFile)
 
     @lock
-    def calibrateMove(self):
-
+    def calibrate_move(self):
         # FIXME: move to a safe zone to do calibrations.
-        def calcDelta(start, end):
+        def calc_delta(start, end):
             return end.angsep(start)
 
         def calibrate(direction, rate):
-            start = self.getPositionRaDec()
+            start = self.get_position_ra_dec()
             self._move(direction, self._calibration_time, rate)
-            end = self.getPositionRaDec()
+            end = self.get_position_ra_dec()
 
-            return calcDelta(start, end)
+            return calc_delta(start, end)
 
         for rate in SlewRate:
             for direction in Direction:
@@ -485,73 +453,72 @@ class Meade(TelescopeBase):
             f = open(self._calibrationFile, "w")
             f.write(pickle.dumps(self._calibration))
             f.close()
-        except Exception, e:
+        except Exception as e:
             self.log.warning("Problems persisting calibration data. (%s)" % e)
 
         self.log.info("Calibration was OK.")
 
-    def _calcDuration(self, arc, direction, rate):
+    def _calc_duration(self, arc, direction, rate):
         """
-        Calculates the time spent (returned number) to move by arc in a 
+        Calculates the time spent (returned number) to move by arc in a
         given direction at a given rate
         """
 
-        if not self.isMoveCalibrated():
-            self.log.info(
-                "Telescope fine movement not calibrated. Calibrating now...")
-            self.calibrateMove()
+        if not self.is_move_calibrated():
+            self.log.info("Telescope fine movement not calibrated. Calibrating now...")
+            self.calibrate_move()
 
         self.log.debug("[move] asked for %s arcsec" % float(arc))
 
         return arc * (self._calibration_time / self._calibration[rate][direction])
 
     @lock
-    def moveEast(self, offset, slewRate=None):
-        return self._move(Direction.E,
-                          self._calcDuration(offset, Direction.E, slewRate),
-                          slewRate)
+    def move_east(self, offset, slew_rate=None):
+        return self._move(
+            Direction.E, self._calc_duration(offset, Direction.E, slew_rate), slew_rate
+        )
 
     @lock
-    def moveWest(self, offset, slewRate=None):
-        return self._move(Direction.W,
-                          self._calcDuration(offset, Direction.W, slewRate),
-                          slewRate)
+    def move_west(self, offset, slew_rate=None):
+        return self._move(
+            Direction.W, self._calc_duration(offset, Direction.W, slew_rate), slew_rate
+        )
 
     @lock
-    def moveNorth(self, offset, slewRate=None):
-        return self._move(Direction.N,
-                          self._calcDuration(offset, Direction.N, slewRate),
-                          slewRate)
+    def move_north(self, offset, slew_rate=None):
+        return self._move(
+            Direction.N, self._calc_duration(offset, Direction.N, slew_rate), slew_rate
+        )
 
     @lock
-    def moveSouth(self, offset, slewRate=None):
-        return self._move(Direction.S,
-                          self._calcDuration(offset, Direction.S, slewRate),
-                          slewRate)
+    def move_south(self, offset, slew_rate=None):
+        return self._move(
+            Direction.S, self._calc_duration(offset, Direction.S, slew_rate), slew_rate
+        )
 
     @lock
-    def stopMoveEast(self):
-        return self._stopMove(Direction.E)
+    def stop_move_east(self):
+        return self._stop_move(Direction.E)
 
     @lock
-    def stopMoveWest(self):
-        return self._stopMove(Direction.W)
+    def stop_move_west(self):
+        return self._stop_move(Direction.W)
 
     @lock
-    def stopMoveNorth(self):
-        return self._stopMove(Direction.N)
+    def stop_move_north(self):
+        return self._stop_move(Direction.N)
 
     @lock
-    def stopMoveSouth(self):
-        return self._stopMove(Direction.S)
+    def stop_move_south(self):
+        return self._stop_move(Direction.S)
 
     @lock
-    def stopMoveAll(self):
+    def stop_move_all(self):
         self._write(":Q#")
         return True
 
     @lock
-    def getRa(self):
+    def get_ra(self):
         self._write(":GR#")
         ret = self._readline()
 
@@ -564,7 +531,7 @@ class Meade(TelescopeBase):
         return Coord.fromHMS(ret[:-1])
 
     @lock
-    def getDec(self):
+    def get_dec(self):
         self._write(":GD#")
         ret = self._readline()
 
@@ -572,53 +539,49 @@ class Meade(TelescopeBase):
         if len(ret) > 10:
             ret = ret[1:]
 
-        ret = ret.replace('\xdf', ':')
+        ret = ret.replace("\xdf", ":")
 
         return Coord.fromDMS(ret[:-1])
 
     @lock
-    def getPositionRaDec(self):
-        return Position.fromRaDec(self.getRa(), self.getDec())
+    def get_position_ra_dec(self):
+        return Position.fromRaDec(self.get_ra(), self.get_dec())
 
     @lock
-    def getPositionAltAz(self):
-        return Position.fromAltAz(self.getAlt(), self.getAz())
+    def get_position_alt_az(self):
+        return Position.fromAltAz(self.get_alt(), self.get_az())
 
     @lock
-    def getTargetRaDec(self):
-        return Position.fromRaDec(self.getTargetRa(), self.getTargetDec())
+    def get_target_ra_dec(self):
+        return Position.fromRaDec(self.get_target_ra(), self.get_target_dec())
 
     @lock
-    def getTargetAltAz(self):
-        return Position.fromAltAz(self.getTargetAlt(), self.getTargetAz())
+    def get_target_alt_az(self):
+        return Position.fromAltAz(self.get_target_alt(), self.get_target_az())
 
     @lock
-    def setTargetRaDec(self, ra, dec):
-
-        self.setTargetRa(ra)
-        self.setTargetDec(dec)
+    def set_target_ra_dec(self, ra, dec):
+        self.set_target_ra(ra)
+        self.set_target_dec(dec)
 
         return True
 
     @lock
-    def setTargetAltAz(self, alt, az):
-
-        self.setTargetAz(az)
-        self.setTargetAlt(alt)
+    def set_target_alt_az(self, alt, az):
+        self.set_target_az(az)
+        self.set_target_alt(alt)
 
         return True
 
     @lock
-    def getTargetRa(self):
-
+    def get_target_ra(self):
         self._write(":Gr#")
         ret = self._readline()
 
         return Coord.fromHMS(ret[:-1])
 
     @lock
-    def setTargetRa(self, ra):
-
+    def set_target_ra(self, ra):
         if not isinstance(ra, Coord):
             ra = Coord.fromHMS(ra)
 
@@ -632,8 +595,7 @@ class Meade(TelescopeBase):
         return True
 
     @lock
-    def setTargetDec(self, dec):
-
+    def set_target_dec(self, dec):
         if not isinstance(dec, Coord):
             dec = Coord.fromDMS(dec)
 
@@ -647,23 +609,23 @@ class Meade(TelescopeBase):
         return True
 
     @lock
-    def getTargetDec(self):
+    def get_target_dec(self):
         self._write(":Gd#")
         ret = self._readline()
 
-        ret = ret.replace('\xdf', ':')
+        ret = ret.replace("\xdf", ":")
 
         return Coord.fromDMS(ret[:-1])
 
     @lock
-    def getAz(self):
+    def get_az(self):
         self._write(":GZ#")
         ret = self._readline()
-        ret = ret.replace('\xdf', ':')
+        ret = ret.replace("\xdf", ":")
 
         c = Coord.fromDMS(ret[:-1])
 
-        if self['azimuth180Correct']:
+        if self["azimuth180Correct"]:
             if c.toD() >= 180:
                 c = c - Coord.fromD(180)
             else:
@@ -672,23 +634,22 @@ class Meade(TelescopeBase):
         return c
 
     @lock
-    def getAlt(self):
+    def get_alt(self):
         self._write(":GA#")
         ret = self._readline()
-        ret = ret.replace('\xdf', ':')
+        ret = ret.replace("\xdf", ":")
 
         return Coord.fromDMS(ret[:-1])
 
-    def getTargetAlt(self):
+    def get_target_alt(self):
         return self._target_alt
 
     @lock
-    def setTargetAlt(self, alt):
-
+    def set_target_alt(self, alt):
         if not isinstance(alt, Coord):
             alt = Coord.fromD(alt)
 
-        self._write(":Sa%s#" % alt.strfcoord("%(d)02d\xdf%(m)02d\'%(s)02d"))
+        self._write(":Sa%s#" % alt.strfcoord("%(d)02d\xdf%(m)02d'%(s)02d"))
 
         ret = self._readbool()
 
@@ -699,46 +660,43 @@ class Meade(TelescopeBase):
 
         return True
 
-    def getTargetAz(self):
+    def get_target_az(self):
         return self._target_az
 
     @lock
-    def setTargetAz(self, az):
-
+    def set_target_az(self, az):
         if not isinstance(az, Coord):
             az = Coord.fromDMS(az)
 
-        if self['azimuth180Correct']:
-
+        if self["azimuth180Correct"]:
             if az.toD() >= 180:
                 az = az - Coord.fromD(180)
             else:
                 az = az + Coord.fromD(180)
 
-        self._write(":Sz%s#" %
-                    az.strfcoord("%(d)03d\xdf%(m)02d:%(s)02d", signed=False))
+        self._write(":Sz%s#" % az.strfcoord("%(d)03d\xdf%(m)02d:%(s)02d", signed=False))
 
         ret = self._readbool()
 
         if not ret:
-            raise MeadeException("Invalid Azimuth '%s'" %
-                                 az.strfcoord("%(d)03d\xdf%(m)02d"))
+            raise MeadeException(
+                "Invalid Azimuth '%s'" % az.strfcoord("%(d)03d\xdf%(m)02d")
+            )
 
         self._target_az = az
 
         return True
 
     @lock
-    def getLat(self):
+    def get_lat(self):
         self._write(":Gt#")
         ret = self._readline()
-        ret = ret.replace('\xdf', ':')[:-1]
+        ret = ret.replace("\xdf", ":")[:-1]
 
         return Coord.fromDMS(ret)
 
     @lock
-    def setLat(self, lat):
-
+    def set_lat(self, lat):
         if not isinstance(lat, Coord):
             lat = Coord.fromDMS(lat)
 
@@ -749,22 +707,20 @@ class Meade(TelescopeBase):
         ret = self._readbool()
 
         if not ret:
-            raise MeadeException(
-                "Invalid Latitude '%s' ('%s')" % (lat, lat_str))
+            raise MeadeException("Invalid Latitude '%s' ('%s')" % (lat, lat_str))
 
         return True
 
     @lock
-    def getLong(self):
+    def get_long(self):
         self._write(":Gg#")
         ret = self._readline()
-        ret = ret.replace('\xdf', ':')[:-1]
+        ret = ret.replace("\xdf", ":")[:-1]
 
         return Coord.fromDMS(ret)
 
     @lock
-    def setLong(self, coord):
-
+    def set_long(self, coord):
         if not isinstance(coord, Coord):
             coord = Coord.fromDMS(coord)
 
@@ -773,20 +729,19 @@ class Meade(TelescopeBase):
         ret = self._readbool()
 
         if not ret:
-            raise MeadeException("Invalid Longitude '%s'" % long)
+            raise MeadeException("Invalid Longitude '%s'" % int)
 
         return True
 
     @lock
-    def getDate(self):
+    def get_date(self):
         self._write(":GC#")
         ret = self._readline()
         return dt.datetime.strptime(ret[:-1], "%m/%d/%y").date()
 
     @lock
-    def setDate(self, date):
-
-        if type(date) == FloatType:
+    def set_date(self, date):
+        if type(date) == float:
             date = dt.date.fromtimestamp(date)
 
         self._write(":SC%s#" % date.strftime("%m/%d/%y"))
@@ -796,31 +751,29 @@ class Meade(TelescopeBase):
         if ret == "0":
             # discard junk null byte
             self._read(1)
-            raise MeadeException(
-                "Couldn't set date, invalid format '%s'" % date)
+            raise MeadeException("Couldn't set date, invalid format '%s'" % date)
 
         elif ret == "1":
             # discard junk message and wait Meade finish update of internal
             # databases
-            tmpTimeout = self._tty.timeout
+            tmp_timeout = self._tty.timeout
             self._tty.timeout = 60
             self._readline()  # junk message
 
             self._readline()
 
-            self._tty.timeout = tmpTimeout
+            self._tty.timeout = tmp_timeout
             return True
 
     @lock
-    def getLocalTime(self):
+    def get_local_time(self):
         self._write(":GL#")
         ret = self._readline()
         return dt.datetime.strptime(ret[:-1], "%H:%M:%S").time()
 
     @lock
-    def setLocalTime(self, local):
-
-        if type(local) == FloatType:
+    def set_local_time(self, local):
+        if type(local) == float:
             local = dt.datetime.fromtimestamp(local).time()
 
         self._write(":SL%s#" % local.strftime("%H:%M:%S"))
@@ -833,14 +786,13 @@ class Meade(TelescopeBase):
         return True
 
     @lock
-    def getLocalSiderealTime(self):
+    def get_local_sidereal_time(self):
         self._write(":GS#")
         ret = self._readline()
         return dt.datetime.strptime(ret[:-1], "%H:%M:%S").time()
 
     @lock
-    def setLocalSiderealTime(self, local):
-
+    def set_local_sidereal_time(self, local):
         self._write(":SS%s#" % local.strftime("%H:%M:%S"))
 
         ret = self._readbool()
@@ -851,14 +803,13 @@ class Meade(TelescopeBase):
         return True
 
     @lock
-    def getUTCOffset(self):
+    def get_utc_offset(self):
         self._write(":GG#")
         ret = self._readline()
         return ret[:-1]
 
     @lock
-    def setUTCOffset(self, offset):
-
+    def set_utc_offset(self, offset):
         offset = "%+02.1f" % offset
 
         self._write(":SG%s#" % offset)
@@ -871,8 +822,7 @@ class Meade(TelescopeBase):
         return True
 
     @lock
-    def getCurrentTrackingRate(self):
-
+    def get_current_tracking_rate(self):
         self._write(":GT#")
 
         ret = self._readline()
@@ -885,8 +835,7 @@ class Meade(TelescopeBase):
         return ret
 
     @lock
-    def setCurrentTrackingRate(self, trk):
-
+    def set_current_tracking_rate(self, trk):
         trk = "%02.1f" % trk
 
         if len(trk) == 3:
@@ -904,32 +853,29 @@ class Meade(TelescopeBase):
         return ret
 
     @lock
-    def startTracking(self):
-
-        if self.getAlignMode() in (AlignMode.POLAR, AlignMode.ALT_AZ):
+    def start_tracking(self):
+        if self.get_align_mode() in (AlignMode.POLAR, AlignMode.ALT_AZ):
             return True
 
-        self.setAlignMode(self._lastAlignMode)
+        self.set_align_mode(self._lastAlignMode)
         return True
 
     @lock
-    def stopTracking(self):
-
-        if self.getAlignMode() == AlignMode.LAND:
+    def stop_tracking(self):
+        if self.get_align_mode() == AlignMode.LAND:
             return True
 
-        self._lastAlignMode = self.getAlignMode()
-        self.setAlignMode(AlignMode.LAND)
+        self._lastAlignMode = self.get_align_mode()
+        self.set_align_mode(AlignMode.LAND)
         return True
 
-    def isTracking(self):
-        if self.getAlignMode() != AlignMode.LAND:
+    def is_tracking(self):
+        if self.get_align_mode() != AlignMode.LAND:
             return True
 
         return False
 
-    def _setHighPrecision(self):
-
+    def _set_high_precision(self):
         self._write(":GR#")
         ret = self._readline()[:-1]
 
@@ -941,9 +887,8 @@ class Meade(TelescopeBase):
     # -- ITelescopeSync implementation --
 
     @lock
-    def syncRaDec(self, position):
-
-        self.setTargetRaDec(position.ra, position.dec)
+    def sync_ra_dec(self, position):
+        self.set_target_ra_dec(position.ra, position.dec)
 
         self._write(":CM#")
 
@@ -951,15 +896,15 @@ class Meade(TelescopeBase):
 
         if not ret:
             raise MeadeException(
-                "Error syncing on '%s' '%s'." % (position.ra, position.dec))
+                "Error syncing on '%s' '%s'." % (position.ra, position.dec)
+            )
 
-        self.syncComplete(self.getPositionRaDec())
+        self.syncComplete(self.get_position_ra_dec())
 
         return True
 
     @lock
-    def setSlewRate(self, rate):
-
+    def set_slew_rate(self, rate):
         if rate == SlewRate.GUIDE:
             self._write(":RG#")
         elif rate == SlewRate.CENTER:
@@ -979,29 +924,26 @@ class Meade(TelescopeBase):
 
         return True
 
-    def getSlewRate(self):
+    def get_slew_rate(self):
         return self._slewRate
 
     # -- park
 
-    def getParkPosition(self):
-        return Position.fromAltAz(self["park_position_alt"],
-                                  self["park_position_az"])
+    def get_park_position(self):
+        return Position.fromAltAz(self["park_position_alt"], self["park_position_az"])
 
     @lock
-    def setParkPosition(self, position):
-
+    def set_park_position(self, position):
         self["park_position_az"], self["park_position_alt"] = position.D
 
         return True
 
-    def isParked(self):
+    def is_parked(self):
         return self._parked
 
     @lock
     def park(self):
-
-        if self.isParked():
+        if self.is_parked():
             return True
 
         # 1. slew to park position FIXME: allow different park
@@ -1009,14 +951,15 @@ class Meade(TelescopeBase):
 
         site = self.getManager().getProxy("/Site/0")
 
-        self.slewToRaDec(Position.fromRaDec(str(self.getLocalSiderealTime()),
-                                            site["latitude"]))
+        self.slew_to_ra_dec(
+            Position.fromRaDec(str(self.get_local_sidereal_time()), site["latitude"])
+        )
 
         # 2. stop tracking
-        self.stopTracking()
+        self.stop_tracking()
 
         # 3. power off
-        #self.powerOff ()
+        # self.powerOff ()
 
         self._parked = True
 
@@ -1026,25 +969,24 @@ class Meade(TelescopeBase):
 
     @lock
     def unpark(self):
-
-        if not self.isParked():
+        if not self.is_parked():
             return True
 
         # 1. power on
-        #self.powerOn ()
+        # self.powerOn ()
 
         # 2. start tracking
-        self.startTracking()
+        self.start_tracking()
 
         # 3. set location, date and time
-        self._initTelescope()
+        self._init_telescope()
 
         # 4. sync on park position (not really necessary when parking
         # on DEC=0, RA=LST
 
         # convert from park position to RA/DEC using the last LST set on 2.
-        #ra = 0
-        #dec = 0
+        # ra = 0
+        # dec = 0
 
         # if not self.sync (ra, dec):
         #    return False
@@ -1058,14 +1000,15 @@ class Meade(TelescopeBase):
     # low-level
     def _debug(self, msg):
         if self._debugLog:
-            print >> self._debugLog, time.time(
-            ), threading.currentThread().getName(), msg
+            print(
+                f"{time.time()} {threading.currentThread().getName()} {msg}",
+                file=self._debugLog,
+            )
             self._debugLog.flush()
 
     def _read(self, n=1, flush=True):
-
         if not self._tty.isOpen():
-            raise IOError("Device not open")
+            raise OSError("Device not open")
 
         if flush:
             self._tty.flushInput()
@@ -1074,16 +1017,15 @@ class Meade(TelescopeBase):
         self._debug("[read ] %s" % repr(ret))
         return ret
 
-    def _readline(self, eol='#'):
+    def _readline(self, eol="#"):
         if not self._tty.isOpen():
-            raise IOError("Device not open")
+            raise OSError("Device not open")
 
         ret = self._tty.readline(None, eol)
         self._debug("[read ] %s" % repr(ret))
         return ret
 
     def _readbool(self):
-
         try:
             ret = int(self._read(1))
         except ValueError:
@@ -1096,7 +1038,7 @@ class Meade(TelescopeBase):
 
     def _write(self, data, flush=True):
         if not self._tty.isOpen():
-            raise IOError("Device not open")
+            raise OSError("Device not open")
 
         if flush:
             self._tty.flushOutput()

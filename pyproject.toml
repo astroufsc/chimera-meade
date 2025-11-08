@@ -1,0 +1,47 @@
+[project]
+name = "chimera-meade"
+version = "0.2"
+description = "Chimera plugin for MEADE telescopes"
+readme = "README.rst"
+license = "GPL-2.0-or-later"
+authors = [
+    { name = "Paulo Henrique Silva", email = "ph.silva@gmail.com" },
+    { name = "William Schoenell", email = "wschoenell@gmail.com" },
+]
+urls = { "homepage" = "https://chimera.readthedocs.org", "source" = "https://github.com/astroufsc/chimera" }
+
+requires-python = ">=3.13"
+dependencies = ["chimera", "pyserial>=3.5"]
+
+[build-system]
+requires = ["uv_build>=0.7.19,<0.8.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+dev-dependencies = [
+    "pre-commit>=4.1.0",
+    "pytest>=8.3.3",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.14.4",
+]
+
+[tool.uv.sources]
+chimera = { path = "../chimera", editable = true }
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib --cov-branch --cov-report=html -sv --continue-on-collection-errors"
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["N", "I", "UP", "F"]
+ignore = [
+    "UP031", # we have lots of '%' formatted strings yet
+]
+
+[tool.ruff.lint.flake8-copyright]
+notice-rgx = "(?i)# SPDX-FileCopyrightText:\\s\\d{4}(-(\\d{4}|present))*"
