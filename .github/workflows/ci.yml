@@ -1,0 +1,32 @@
+name: chimera-meade
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true        
+
+      - name: install
+        run: uv sync --locked --all-extras --dev        
+
+      - name: lint
+        run: uv run pre-commit run --all-files
+
+      - name: test
+        run: uv run pytest
+
+      - name: build
+        run: uv build
