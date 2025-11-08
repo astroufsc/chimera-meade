@@ -1,7 +1,7 @@
 [project]
 name = "chimera-meade"
 version = "0.2"
-description = "Chimera - Observatory Automation System"
+description = "Chimera plugin for MEADE telescopes"
 readme = "README.rst"
 license = "GPL-2.0-or-later"
 authors = [
